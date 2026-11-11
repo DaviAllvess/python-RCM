@@ -5,174 +5,264 @@ import pandas as pd
 from pathlib import Path
 
 # ==========================================
-# CONFIGURAÇÃO DA PÁGINA
+# 1. CONFIGURAÇÃO DA PÁGINA
 # ==========================================
 
 st.set_page_config(
-    page_title="RCM Presidente Figueiredo - Piloto",
+    page_title="RCM Presidente Figueiredo - 2026",
     page_icon="📚",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # ==========================================
-# CARREGAMENTO DOS DADOS
+# 2. CARREGAMENTO DO JSON
 # ==========================================
 
 @st.cache_data
 def load_data():
-    json_path = Path(__file__).parent / "matriz_curricular_rcm_2026.json"
+    pasta_app = Path(__file__).resolve().parent
 
-    if not json_path.exists():
+    caminhos = [
+        pasta_app / "matriz_curricular_rcm_2026.json",
+        Path.cwd() / "matriz_curricular_rcm_2026.json"
+    ]
+
+    json_path = next(
+        (caminho for caminho in caminhos if caminho.exists()),
+        None
+    )
+
+    if json_path is None:
         raise FileNotFoundError(
-            "O arquivo matriz_curricular_rcm_2026.json não foi encontrado."
+            "Não encontrei o arquivo matriz_curricular_rcm_2026.json. "
+            "Coloque o JSON na mesma pasta do app_piloto_rcm.py."
         )
 
     with open(json_path, "r", encoding="utf-8") as arquivo:
-        return json.load(arquivo)
+        dados = json.load(arquivo)
+
+    if isinstance(dados, dict):
+        dados = dados.get("habilidades", [])
+
+    if not isinstance(dados, list):
+        raise ValueError(
+            "O JSON precisa conter uma lista de habilidades."
+        )
+
+    return dados
 
 
 try:
-    data = load_data()
-    df = pd.DataFrame(data)
+    dados = load_data()
+    df = pd.DataFrame(dados)
 
     if df.empty:
-        st.error("O arquivo JSON não possui habilidades cadastradas.")
+        st.error("O arquivo JSON está vazio ou não possui habilidades.")
         st.stop()
 
-except Exception as e:
-    st.error(f"Erro ao carregar os dados: {e}")
+except Exception as erro:
+    st.error(f"Erro ao carregar o arquivo JSON: {erro}")
     st.stop()
 
 
 # ==========================================
-# VERIFICAÇÃO DAS COLUNAS
+# 3. VERIFICAÇÃO DOS CAMPOS
 # ==========================================
 
-colunas_obrigatorias = [
+campos_obrigatorios = [
     "id_habilidade",
     "componente_curricular",
     "etapa_ano",
-    "bimestre",
-    "descricao_habilidade",
-    "codigo_bncc_co",
-    "eixo_computacao",
-    "dimensao_rcm",
-    "inteligencias_multiplas",
-    "praxis_territorio"
+    "bimestre"
 ]
 
-colunas_faltantes = [
-    coluna for coluna in colunas_obrigatorias
-    if coluna not in df.columns
+campos_faltantes = [
+    campo for campo in campos_obrigatorios
+    if campo not in df.columns
 ]
 
-if colunas_faltantes:
+if campos_faltantes:
     st.error(
-        "O arquivo JSON não possui estas colunas: "
-        + ", ".join(colunas_faltantes)
+        "Existem campos obrigatórios ausentes no JSON: "
+        + ", ".join(campos_faltantes)
     )
+
+    st.write("Campos encontrados no arquivo:")
+    st.write(list(df.columns))
     st.stop()
 
 
 # ==========================================
-# TÍTULO
+# 4. FUNÇÕES AUXILIARES
+# ==========================================
+
+def obter_texto(valor, padrao="Não informado"):
+    if valor is None:
+        return padrao
+
+    if isinstance(valor, float) and pd.isna(valor):
+        return padrao
+
+    if isinstance(valor, list):
+        return ", ".join(str(item) for item in valor)
+
+    return str(valor)
+
+
+def obter_opcoes(coluna, opcao_todos):
+    valores = (
+        df[coluna]
+        .dropna()
+        .astype(str)
+        .unique()
+        .tolist()
+    )
+
+    return [opcao_todos] + sorted(valores)
+
+
+# ==========================================
+# 5. CABEÇALHO
 # ==========================================
 
 st.title("📚 RCM 2026 - Consulta & Planejamento Curricular")
 
 st.caption(
-    "Piloto de consulta do Referencial Curricular Municipal "
-    "de Presidente Figueiredo"
+    "Referencial Curricular Municipal de Presidente Figueiredo"
 )
 
 st.divider()
 
+# Indicadores
+col1, col2, col3 = st.columns(3)
 
-# ==========================================
-# FILTROS DE BUSCA
-# ==========================================
+with col1:
+    st.metric("Total de habilidades", len(df))
 
-st.sidebar.header("🔍 Filtros de Busca")
+with col2:
+    st.metric(
+        "Componentes curriculares",
+        df["componente_curricular"].nunique()
+    )
 
-
-def opcoes_coluna(coluna, todos):
-    valores = df[coluna].dropna().astype(str).unique().tolist()
-    return [todos] + sorted(valores)
-
-
-componentes = opcoes_coluna("componente_curricular", "Todos")
-comp_sel = st.sidebar.selectbox(
-    "Componente Curricular", componentes
-)
-
-anos = opcoes_coluna("etapa_ano", "Todos")
-ano_sel = st.sidebar.selectbox(
-    "Etapa / Ano", anos
-)
-
-bimestres = opcoes_coluna("bimestre", "Todos")
-bim_sel = st.sidebar.selectbox(
-    "Bimestre", bimestres
-)
-
-dimensoes = opcoes_coluna("dimensao_rcm", "Todas")
-dim_sel = st.sidebar.selectbox(
-    "Dimensão do RCM", dimensoes
-)
-
-
-# ==========================================
-# FILTRAGEM
-# ==========================================
-
-df_filtered = df.copy()
-
-if comp_sel != "Todos":
-    df_filtered = df_filtered[
-        df_filtered["componente_curricular"] == comp_sel
-    ]
-
-if ano_sel != "Todos":
-    df_filtered = df_filtered[
-        df_filtered["etapa_ano"] == ano_sel
-    ]
-
-if bim_sel != "Todos":
-    df_filtered = df_filtered[
-        df_filtered["bimestre"] == bim_sel
-    ]
-
-if dim_sel != "Todas":
-    df_filtered = df_filtered[
-        df_filtered["dimensao_rcm"] == dim_sel
-    ]
-
-
-# ==========================================
-# RESULTADOS
-# ==========================================
-
-st.subheader(
-    f"📋 Habilidades Encontradas ({len(df_filtered)})"
-)
-
-if df_filtered.empty:
-    st.warning(
-        "Nenhuma habilidade encontrada com os filtros selecionados."
+with col3:
+    st.metric(
+        "Etapas e anos",
+        df["etapa_ano"].nunique()
     )
 
 
 # ==========================================
-# EXIBIÇÃO DAS HABILIDADES
+# 6. FILTROS
 # ==========================================
 
-for idx, row in df_filtered.iterrows():
+st.sidebar.header("🔍 Filtros de Busca")
 
-    codigo = row.get("id_habilidade", "Sem código")
-    componente = row.get("componente_curricular", "Não informado")
-    etapa = row.get("etapa_ano", "Não informado")
-    bimestre = row.get("bimestre", "Não informado")
+componentes = obter_opcoes(
+    "componente_curricular", "Todos"
+)
+
+comp_sel = st.sidebar.selectbox(
+    "Componente Curricular",
+    componentes
+)
+
+anos = obter_opcoes(
+    "etapa_ano", "Todos"
+)
+
+ano_sel = st.sidebar.selectbox(
+    "Etapa / Ano",
+    anos
+)
+
+bimestres = obter_opcoes(
+    "bimestre", "Todos"
+)
+
+bim_sel = st.sidebar.selectbox(
+    "Bimestre",
+    bimestres
+)
+
+if "dimensao_rcm" in df.columns:
+    dimensoes = obter_opcoes(
+        "dimensao_rcm", "Todas"
+    )
+
+    dim_sel = st.sidebar.selectbox(
+        "Dimensão do RCM",
+        dimensoes
+    )
+else:
+    dim_sel = "Todas"
+
+
+# ==========================================
+# 7. APLICAÇÃO DOS FILTROS
+# ==========================================
+
+df_filtrado = df.copy()
+
+if comp_sel != "Todos":
+    df_filtrado = df_filtrado[
+        df_filtrado["componente_curricular"].astype(str)
+        == comp_sel
+    ]
+
+if ano_sel != "Todos":
+    df_filtrado = df_filtrado[
+        df_filtrado["etapa_ano"].astype(str)
+        == ano_sel
+    ]
+
+if bim_sel != "Todos":
+    df_filtrado = df_filtrado[
+        df_filtrado["bimestre"].astype(str)
+        == bim_sel
+    ]
+
+if dim_sel != "Todas" and "dimensao_rcm" in df.columns:
+    df_filtrado = df_filtrado[
+        df_filtrado["dimensao_rcm"].astype(str)
+        == dim_sel
+    ]
+
+
+# ==========================================
+# 8. LISTAGEM DAS HABILIDADES
+# ==========================================
+
+st.divider()
+
+st.subheader(
+    f"📋 Habilidades Encontradas: {len(df_filtrado)}"
+)
+
+if df_filtrado.empty:
+    st.warning(
+        "Nenhuma habilidade encontrada. "
+        "Experimente alterar os filtros."
+    )
+
+for idx, row in df_filtrado.iterrows():
+
+    codigo = obter_texto(
+        row.get("id_habilidade")
+    )
+
+    componente = obter_texto(
+        row.get("componente_curricular")
+    )
+
+    etapa = obter_texto(
+        row.get("etapa_ano")
+    )
+
+    bimestre = obter_texto(
+        row.get("bimestre")
+    )
 
     with st.expander(
         f"📌 [{codigo}] {componente} - {etapa} ({bimestre})",
@@ -187,51 +277,50 @@ for idx, row in df_filtered.iterrows():
             )
 
             st.markdown(
-                f"**BNCC Computação:** "
-                f"`{row.get('codigo_bncc_co', 'N/A')}`"
+                "**BNCC Computação:** "
+                f"`{obter_texto(row.get('codigo_bncc_co'))}`"
             )
 
             st.markdown(
-                f"**Dimensão RCM:** "
-                f"{row.get('dimensao_rcm', 'Não informada')}"
+                "**Dimensão RCM:** "
+                f"{obter_texto(row.get('dimensao_rcm'))}"
             )
 
         with col2:
             st.markdown(
-                f"**Inteligências Múltiplas:** "
-                f"{row.get('inteligencias_multiplas', 'Não informado')}"
+                "**Inteligências Múltiplas:** "
+                f"{obter_texto(row.get('inteligencias_multiplas'))}"
             )
 
             st.markdown(
-                f"**Eixo Computação:** "
-                f"{row.get('eixo_computacao', 'Não informado')}"
+                "**Eixo Computação:** "
+                f"{obter_texto(row.get('eixo_computacao'))}"
             )
 
-        st.markdown(
-            f"**Descrição da Habilidade:**\n\n"
-            f"{row.get('descricao_habilidade', 'Não informada')}"
+        st.markdown("### 📖 Descrição da Habilidade")
+
+        st.write(
+            obter_texto(row.get("descricao_habilidade"))
         )
 
         st.info(
-            "🌿 **Práxis Territorial (Presidente Figueiredo):**\n\n"
-            f"{row.get('praxis_territorio', 'Não informada')}"
+            "🌿 **Práxis Territorial - Presidente Figueiredo**\n\n"
+            + obter_texto(row.get("praxis_territorio"))
         )
 
         if st.button(
             "📝 Criar Plano com esta Habilidade",
             key=f"btn_{idx}"
         ):
-
-            st.session_state["selected_habilidade"] = row.to_dict()
-
-            st.success(
-                "Habilidade selecionada! "
-                "Preencha o gerador de plano de aula abaixo."
+            st.session_state["selected_habilidade"] = (
+                row.to_dict()
             )
+
+            st.rerun()
 
 
 # ==========================================
-# GERADOR DE PLANO DE AULA
+# 9. GERADOR DE PLANO DE AULA
 # ==========================================
 
 st.divider()
@@ -242,12 +331,12 @@ if "selected_habilidade" in st.session_state:
 
     hab = st.session_state["selected_habilidade"]
 
-    codigo = hab.get("id_habilidade", "Sem código")
+    codigo = obter_texto(
+        hab.get("id_habilidade")
+    )
 
     st.success(
-        f"Habilidade selecionada: {codigo} - "
-        f"{hab.get('componente_curricular', '')} "
-        f"({hab.get('etapa_ano', '')})"
+        f"Habilidade selecionada: {codigo}"
     )
 
     with st.form("plano_form"):
@@ -262,63 +351,103 @@ if "selected_habilidade" in st.session_state:
         )
 
         metodologia = st.text_area(
-            "Metodologia & Atividades",
+            "Metodologia e Atividades",
             value=(
                 "Aula baseada na práxis territorial: "
-                f"{hab.get('praxis_territorio', '')}"
+                + obter_texto(
+                    hab.get("praxis_territorio")
+                )
             )
         )
 
         recursos = st.text_input(
             "Recursos Didáticos",
-            value="Quadro, cartazes, material impresso RCM"
+            value="Quadro, cartazes e material impresso RCM"
+        )
+
+        objetivo = st.text_area(
+            "Objetivo da Aula",
+            value=obter_texto(
+                hab.get("descricao_habilidade")
+            )
         )
 
         submitted = st.form_submit_button(
-            "💾 Salvar & Exportar Plano"
+            "💾 Gerar Plano de Aula"
         )
 
     if submitted:
 
-        plano_txt = f"""=== PLANO DE AULA (RCM 2026) ===
+        plano_txt = f"""
+========================================
+PLANO DE AULA - RCM 2026
+PRESIDENTE FIGUEIREDO
+========================================
+
+IDENTIFICAÇÃO
 
 Turma: {turma}
 Data: {data_aula}
 
-Componente Curricular: {hab.get('componente_curricular', '')}
-Etapa/Ano: {hab.get('etapa_ano', '')}
-Bimestre: {hab.get('bimestre', '')}
+Componente Curricular:
+{obter_texto(hab.get('componente_curricular'))}
+
+Etapa/Ano:
+{obter_texto(hab.get('etapa_ano'))}
+
+Bimestre:
+{obter_texto(hab.get('bimestre'))}
+
+HABILIDADES
 
 BNCC Nacional: {codigo}
-BNCC Computação: {hab.get('codigo_bncc_co', 'N/A')}
 
-Dimensão RCM: {hab.get('dimensao_rcm', '')}
-Inteligências Múltiplas: {hab.get('inteligencias_multiplas', '')}
-Eixo Computação: {hab.get('eixo_computacao', '')}
+BNCC Computação:
+{obter_texto(hab.get('codigo_bncc_co'))}
 
-DESCRIÇÃO DA HABILIDADE:
-{hab.get('descricao_habilidade', '')}
+Descrição da Habilidade:
+{obter_texto(hab.get('descricao_habilidade'))}
 
-PRÁXIS TERRITORIAL:
-{hab.get('praxis_territorio', '')}
+Dimensão RCM:
+{obter_texto(hab.get('dimensao_rcm'))}
 
-METODOLOGIA E ATIVIDADES:
+Eixo Computação:
+{obter_texto(hab.get('eixo_computacao'))}
+
+Inteligências Múltiplas:
+{obter_texto(hab.get('inteligencias_multiplas'))}
+
+OBJETIVO DA AULA
+
+{objetivo}
+
+METODOLOGIA E ATIVIDADES
+
 {metodologia}
 
-RECURSOS DIDÁTICOS:
+PRÁXIS TERRITORIAL
+
+{obter_texto(hab.get('praxis_territorio'))}
+
+RECURSOS DIDÁTICOS
+
 {recursos}
 
-=== FIM DO PLANO ===
+========================================
+FIM DO PLANO DE AULA
+========================================
 """
 
+        st.subheader("📄 Plano de Aula Gerado")
+
         st.text_area(
-            "Plano Gerado (Pronto para copiar)",
+            "Seu plano está pronto para copiar:",
             value=plano_txt,
-            height=350
+            height=400
         )
 
         st.download_button(
-            "📥 Baixar Plano de Aula (.txt)",
+            label="📥 Baixar Plano de Aula",
             data=plano_txt,
             file_name=f"plano_{codigo}.txt",
             mime="text/plain"
@@ -327,6 +456,22 @@ RECURSOS DIDÁTICOS:
 else:
 
     st.info(
-        "Selecione uma habilidade acima para preencher "
-        "o gerador de plano de aula."
+        "Selecione uma habilidade na lista acima "
+        "para começar a criar seu plano de aula."
     )
+
+# ==========================================
+# 10. RODAPÉ
+# ==========================================
+
+st.divider()
+
+st.caption(
+    "📚 RCM 2026 | Referencial Curricular Municipal "
+    "de Presidente Figueiredo - Amazonas"
+)
+
+
+
+
+
